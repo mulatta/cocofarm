@@ -73,12 +73,26 @@
         }
       );
 
-      devShells = eachSystem (system: {
-        default = import ./devshell.nix {
+      devShells = eachSystem (
+        system:
+        let
           pkgs = pkgsFor.${system};
-          formatter = treefmtEval.${system}.config.build.wrapper;
-        };
-      });
+          python = pkgs.python3.withPackages (_: [
+            (pkgs.python3Packages.toPythonModule packages.${system}.cocoindex)
+          ]);
+        in
+        {
+          default = pkgs.mkShellNoCC {
+            packages = [
+              pkgs.gh
+              pkgs.git
+              pkgs.nix-output-monitor
+              python
+              treefmtEval.${system}.config.build.wrapper
+            ];
+          };
+        }
+      );
 
       formatter = eachSystem (system: treefmtEval.${system}.config.build.wrapper);
     };

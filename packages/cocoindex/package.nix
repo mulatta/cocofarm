@@ -1,6 +1,7 @@
 {
   lib,
   fetchFromGitHub,
+  installAgentSkills,
   rustPlatform,
   python3Packages,
 }:
@@ -29,9 +30,15 @@ python3Packages.buildPythonApplication (finalAttrs: {
   '';
 
   nativeBuildInputs = [
+    installAgentSkills
     rustPlatform.cargoSetupHook
     rustPlatform.maturinBuildHook
   ];
+
+  dontInstallAgentSkills = true;
+  postInstall = ''
+    installSkill skills/cocoindex cocoindex
+  '';
 
   dependencies = with python3Packages; [
     click
@@ -45,6 +52,12 @@ python3Packages.buildPythonApplication (finalAttrs: {
   ];
 
   pythonImportsCheck = [ "cocoindex" ];
+
+  doInstallCheck = true;
+  postInstallCheck = ''
+    test -f $out/share/skills/cocoindex/cocoindex/SKILL.md
+    test -d $out/share/skills/cocoindex/cocoindex/references
+  '';
 
   passthru.updateScript = ./update.py;
 

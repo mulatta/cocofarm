@@ -1,0 +1,105 @@
+name: Update Packages
+
+on:
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+    inputs:
+      packages:
+        description: "Space-separated packages to update; empty updates all"
+        required: false
+        default: ""
+
+jobs:
+  discover:
+    runs-on: ubuntu-slim
+    outputs:
+      matrix: ${{ steps.discover.outputs.matrix }}
+      has-packages: ${{ steps.discover.outputs.has-packages }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Nix
+        uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            extra-substituters = https://cache.mulatta.io
+            extra-trusted-public-keys = cache.mulatta.io-1:DrV+Oy2azNyVKM7ihhD1QoOetRUnW+1G6RWToUpSO4U=
+      - name: Build update matrix
+        id: discover
+        env:
+          PACKAGES: ${{ inputs.packages }}
+        run: .github/ci/discovery.py
+
+  update:
+    needs: discover
+    if: needs.discover.outputs.has-packages == 'true'
+    runs-on: ubuntu-slim
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.discover.outputs.matrix) }}
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Setup Nix
+        uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            extra-substituters = https://cache.mulatta.io
+            extra-trusted-public-keys = cache.mulatta.io-1:DrV+Oy2azNyVKM7ihhD1QoOetRUnW+1G6RWToUpSO4U=
+      - name: Set up git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+      - name: Stash CI scripts
+        run: cp -r .github/ci "$RUNNER_TEMP/ci"
+      - name: Prepare update branch
+        env:
+          PACKAGE: ${{ matrix.package }}
+        run: |
+          branch="dependencies/$PACKAGE"
+          git fetch origin main
+          if git fetch origin "$branch"; then
+            git checkout -B "$branch" "origin/$branch"
+            if ! git rebase origin/main; then
+              git rebase --abort
+              git reset --hard origin/main
+            fi
+          else
+            git checkout -B "$branch" origin/main
+          fi
+      - name: Perform update
+        id: update
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          "$RUNNER_TEMP/ci/update.py" "${{ matrix.package }}"
+      - name: Generate GitHub App token
+        if: steps.update.outputs.updated == 'true'
+        id: app-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+      - name: Create pull request
+        if: steps.update.outputs.updated == 'true'
+        id: pull-request
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          base: main
+          branch: dependencies/${{ matrix.package }}
+          commit-message: "${{ matrix.package }}: update to ${{ steps.update.outputs.new_version }}"
+          title: "${{ matrix.package }}: ${{ matrix.current_version }} -> ${{ steps.update.outputs.new_version }}"
+          body: "Update ${{ matrix.package }} to latest stable release."
+          labels: dependencies
+          delete-branch: true
+      - name: Enable auto-merge
+        if: steps.pull-request.outputs.pull-request-number
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: gh pr merge --auto --merge "${{ steps.pull-request.outputs.pull-request-number }}"

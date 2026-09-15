@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
-"""Run package updater and report resulting changes."""
+"""Run a package or flake input updater and report resulting changes."""
 
 import argparse
+import json
 import os
 import subprocess
 from pathlib import Path
 
 
 def run(
-    command: list[str], *, capture: bool = False
+    command: list[str], *, capture: bool = False, check: bool = True
 ) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(command, text=True, capture_output=capture, check=True)
+    return subprocess.run(command, text=True, capture_output=capture, check=check)
 
 
 def nix_version(package: str) -> str:
@@ -20,11 +21,7 @@ def nix_version(package: str) -> str:
 
 
 def has_changes() -> bool:
-    result = subprocess.run(
-        ["git", "diff", "--quiet", "origin/main"],
-        text=True,
-        check=False,
-    )
+    result = run(["git", "diff", "--quiet", "origin/main"], check=False)
     return result.returncode != 0
 
 
@@ -37,18 +34,35 @@ def write_output(name: str, value: str) -> None:
         print(f"{name}={value}")
 
 
+def update_package(name: str) -> str:
+    update_script = Path("packages") / name / "update.py"
+    if not update_script.is_file():
+        raise SystemExit(f"package has no update script: {name}")
+    run([str(update_script)])
+    return nix_version(name)
+
+
+def update_flake_input(name: str) -> str:
+    run(["nix", "flake", "update", name])
+    nodes = json.loads(Path("flake.lock").read_text())["nodes"]
+    if name not in nodes:
+        raise SystemExit(f"unknown flake input: {name}")
+    return str(nodes[name].get("locked", {}).get("rev", "unknown"))[:8]
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("package")
+    parser.add_argument("type", choices=["package", "flake-input"])
+    parser.add_argument("name")
     args = parser.parse_args()
 
-    update_script = Path("packages") / args.package / "update.py"
-    if not update_script.is_file():
-        raise SystemExit(f"package has no update script: {args.package}")
+    if args.type == "package":
+        new_version = update_package(args.name)
+    else:
+        new_version = update_flake_input(args.name)
 
-    run([str(update_script)])
     write_output("updated", str(has_changes()).lower())
-    write_output("new_version", nix_version(args.package))
+    write_output("new_version", new_version)
 
 
 if __name__ == "__main__":

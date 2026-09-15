@@ -1,0 +1,156 @@
+name: Update Flake
+
+on:
+  workflow_call:
+    inputs:
+      packages:
+        description: "Space-separated packages to update; empty updates all"
+        required: false
+        type: string
+        default: ""
+      inputs:
+        description: "Space-separated flake inputs to update; empty updates all"
+        required: false
+        type: string
+        default: ""
+      auto-merge:
+        description: "Enable auto-merge for created pull requests"
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      APP_ID:
+        description: "GitHub App ID"
+        required: true
+      APP_PRIVATE_KEY:
+        description: "GitHub App private key"
+        required: true
+
+jobs:
+  discover:
+    runs-on: ubuntu-slim
+    outputs:
+      matrix: ${{ steps.discover.outputs.matrix }}
+      has-updates: ${{ steps.discover.outputs.has-updates }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Nix
+        uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            extra-substituters = https://cache.mulatta.io
+            extra-trusted-public-keys = cache.mulatta.io-1:DrV+Oy2azNyVKM7ihhD1QoOetRUnW+1G6RWToUpSO4U=
+      - name: Build update matrix
+        id: discover
+        env:
+          PACKAGES: ${{ inputs.packages }}
+          INPUTS: ${{ inputs.inputs }}
+        run: .github/ci/discovery.py
+
+  update:
+    needs: discover
+    if: needs.discover.outputs.has-updates == 'true'
+    runs-on: ubuntu-slim
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.discover.outputs.matrix) }}
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Setup Nix
+        uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            extra-substituters = https://cache.mulatta.io
+            extra-trusted-public-keys = cache.mulatta.io-1:DrV+Oy2azNyVKM7ihhD1QoOetRUnW+1G6RWToUpSO4U=
+      - name: Set up git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+      - name: Stash CI scripts
+        run: cp -r .github/ci "$RUNNER_TEMP/ci"
+      - name: Prepare update branch
+        env:
+          TYPE: ${{ matrix.type }}
+          NAME: ${{ matrix.name }}
+        run: |
+          if [[ "$TYPE" = package ]]; then
+            branch="dependencies/$NAME"
+          else
+            branch="dependencies/flake-$NAME"
+          fi
+          git fetch origin main
+          if git fetch origin "$branch"; then
+            git checkout -B "$branch" "origin/$branch"
+            if ! git rebase origin/main; then
+              git rebase --abort
+              git reset --hard origin/main
+            fi
+          else
+            git checkout -B "$branch" origin/main
+          fi
+      - name: Perform update
+        id: update
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          TYPE: ${{ matrix.type }}
+          NAME: ${{ matrix.name }}
+        run: |
+          if [[ "$TYPE" = package ]]; then
+            nix develop -c "$RUNNER_TEMP/ci/update.py" "$TYPE" "$NAME"
+          else
+            "$RUNNER_TEMP/ci/update.py" "$TYPE" "$NAME"
+          fi
+      - name: Prepare pull request
+        if: steps.update.outputs.updated == 'true'
+        id: pull-request-data
+        env:
+          TYPE: ${{ matrix.type }}
+          NAME: ${{ matrix.name }}
+          CURRENT_VERSION: ${{ matrix.current_version }}
+          NEW_VERSION: ${{ steps.update.outputs.new_version }}
+        run: |
+          if [[ "$TYPE" = package ]]; then
+            branch="dependencies/$NAME"
+            title="$NAME: $CURRENT_VERSION -> $NEW_VERSION"
+            body="Update $NAME to latest stable release."
+          else
+            branch="dependencies/flake-$NAME"
+            title="flake.lock: update $NAME"
+            body="Update $NAME from $CURRENT_VERSION to $NEW_VERSION."
+          fi
+          {
+            echo "branch=$branch"
+            echo "title=$title"
+            echo "body=$body"
+          } >> "$GITHUB_OUTPUT"
+      - name: Generate GitHub App token
+        if: steps.update.outputs.updated == 'true'
+        id: app-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+      - name: Create pull request
+        if: steps.update.outputs.updated == 'true'
+        id: pull-request
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          base: main
+          branch: ${{ steps.pull-request-data.outputs.branch }}
+          commit-message: ${{ steps.pull-request-data.outputs.title }}
+          title: ${{ steps.pull-request-data.outputs.title }}
+          body: ${{ steps.pull-request-data.outputs.body }}
+          labels: dependencies
+          delete-branch: true
+      - name: Enable auto-merge
+        if: inputs.auto-merge && steps.pull-request.outputs.pull-request-number
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: gh pr merge --auto --merge "${{ steps.pull-request.outputs.pull-request-number }}"

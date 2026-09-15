@@ -57,40 +57,32 @@
             nixfmt.enable = true;
             ruff-check.enable = true;
             ruff-format.enable = true;
+            shellcheck.enable = true;
+            shfmt.enable = true;
             statix.enable = true;
           };
-        }
-      );
-    in
-    {
-      inherit packages;
-
-      checks = eachSystem (
-        system:
-        lib.mapAttrs' (name: package: lib.nameValuePair "package-${name}" package) packages.${system}
-        // {
-          formatting = treefmtEval.${system}.config.build.check self;
         }
       );
 
       devShells = eachSystem (
         system:
-        let
+        import ./shells {
           pkgs = pkgsFor.${system};
-          python = pkgs.python3.withPackages (_: [
-            (pkgs.python3Packages.toPythonModule packages.${system}.cocoindex)
-          ]);
-        in
-        {
-          default = pkgs.mkShellNoCC {
-            packages = [
-              pkgs.gh
-              pkgs.git
-              pkgs.nix-output-monitor
-              python
-              treefmtEval.${system}.config.build.wrapper
-            ];
+          perSystem.self = packages.${system} // {
+            formatter = treefmtEval.${system}.config.build.wrapper;
           };
+        }
+      );
+    in
+    {
+      inherit devShells packages;
+
+      checks = eachSystem (
+        system:
+        lib.mapAttrs' (name: package: lib.nameValuePair "package-${name}" package) packages.${system}
+        // lib.mapAttrs' (name: shell: lib.nameValuePair "devshell-${name}" shell) devShells.${system}
+        // {
+          formatting = treefmtEval.${system}.config.build.check self;
         }
       );
 

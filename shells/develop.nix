@@ -12,6 +12,8 @@ pkgs.mkShellNoCC {
     pythonEnv
   ];
 
+  PYTHON_ENV = pythonEnv;
+
   shellHook = ''
     REPO_ROOT="$(git rev-parse --show-toplevel)"
     export REPO_ROOT

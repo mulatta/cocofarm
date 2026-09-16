@@ -49,19 +49,7 @@
       packages = eachSystem (system: mkPackagesFor pkgsFor.${system});
 
       treefmtEval = eachSystem (
-        system:
-        treefmt-nix.lib.evalModule pkgsFor.${system} {
-          projectRootFile = "flake.nix";
-          programs = {
-            deadnix.enable = true;
-            nixfmt.enable = true;
-            ruff-check.enable = true;
-            ruff-format.enable = true;
-            shellcheck.enable = true;
-            shfmt.enable = true;
-            statix.enable = true;
-          };
-        }
+        system: treefmt-nix.lib.evalModule pkgsFor.${system} (import ./treefmt.nix)
       );
 
       devShells = eachSystem (

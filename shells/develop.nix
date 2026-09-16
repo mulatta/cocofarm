@@ -1,13 +1,21 @@
 { pkgs, perSystem }:
 let
   inherit (perSystem.self) cocoindex formatter;
-  pythonEnv = pkgs.python3.withPackages (_: [ cocoindex ]);
+  pythonEnv = pkgs.python3.withPackages (
+    p:
+    [
+      p.httpx
+      p.ipykernel
+    ]
+    ++ [
+      cocoindex
+    ]
+  );
 in
 pkgs.mkShellNoCC {
   packages = [
     pkgs.coreutils
     pkgs.git
-    cocoindex
     formatter
     pythonEnv
   ];

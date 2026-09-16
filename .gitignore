@@ -1,6 +1,19 @@
-.direnv/
+# python
 __pycache__/
 *.py[cod]
+
+# nix
 result
 result-*
+
+# AI
 .agents/*
+
+# credentials
+.env
+
+# Others
+.direnv/
+.env
+cocoindex.db
+output/

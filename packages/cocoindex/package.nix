@@ -6,7 +6,7 @@
   python3Packages,
 }:
 
-python3Packages.buildPythonApplication (finalAttrs: {
+python3Packages.buildPythonPackage (finalAttrs: {
   pname = "cocoindex";
   version = "1.0.20";
   pyproject = true;

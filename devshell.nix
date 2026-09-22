@@ -1,6 +1,6 @@
 { pkgs, perSystem }:
 let
-  inherit (perSystem.self) cocoindex formatter;
+  inherit (perSystem.self) cocoindex formatter pdf-inspector;
   pythonEnv = pkgs.python3.withPackages (
     p:
     [
@@ -9,6 +9,7 @@ let
     ]
     ++ [
       cocoindex
+      pdf-inspector
     ]
   );
 in

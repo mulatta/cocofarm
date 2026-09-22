@@ -52,15 +52,14 @@
         system: treefmt-nix.lib.evalModule pkgsFor.${system} (import ./treefmt.nix)
       );
 
-      devShells = eachSystem (
-        system:
-        import ./shells {
+      devShells = eachSystem (system: {
+        default = import ./devshell.nix {
           pkgs = pkgsFor.${system};
           perSystem.self = packages.${system} // {
             formatter = treefmtEval.${system}.config.build.wrapper;
           };
-        }
-      );
+        };
+      });
     in
     {
       inherit devShells packages;

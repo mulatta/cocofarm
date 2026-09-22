@@ -16,6 +16,7 @@ pkgs.mkShellNoCC {
   packages = [
     pkgs.coreutils
     pkgs.git
+    pkgs.sqlite
     formatter
     pythonEnv
   ];
